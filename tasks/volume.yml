@@ -43,7 +43,7 @@
 
 - name: mount tftpboot bind
   ansible.posix.mount:
-    path: '/srv/tftpboot/{{ item.serial }}'
+    path: '{{ pxe_image_tftp_base }}/{{ item.serial }}'
     src: '{{ pxe_image_nfs_base }}/pi4-{{ item.serial }}/boot'
     fstype: none
     opts: bind

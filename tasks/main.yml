@@ -16,25 +16,25 @@
     state: directory
     mode: '0755'
   loop:
-    - /srv/nfs
-    - /srv/nfs/base/bootmnt
-    - /srv/nfs/base/rootmnt
-    - /srv/tftpboot
+    - '{{ pxe_image_nfs_base }}'
+    - '{{ pxe_image_nfs_base }}/base/bootmnt'
+    - '{{ pxe_image_nfs_base }}/base/rootmnt'
+    - '{{ pxe_image_tftp_base }}'
 
 - name: download os imge
   get_url:
     url: '{{ pxe_image_url }}'
-    dest: '/srv/nfs/base/{{ pxe_image_version }}.zip'
+    dest: '{{ pxe_image_nfs_base }}/base/{{ pxe_image_version }}.zip'
 
 - name: unarchive a file that is already on the remote machine
   ansible.builtin.unarchive:
-    src: '/srv/nfs/base/{{ pxe_image_version }}.zip'
-    dest: /srv/nfs/base
+    src: '{{ pxe_image_nfs_base }}/base/{{ pxe_image_version }}.zip'
+    dest: '{{ pxe_image_nfs_base }}/base'
     remote_src: true
 
 - name: get stats of a rootfs
   ansible.builtin.stat:
-    path: '/srv/nfs/base/rootmnt/etc/os-release'
+    path: '{{ pxe_image_nfs_base }}/base/rootmnt/etc/os-release'
   register: rootfs_st
 
 - name: exec kpartx
@@ -50,7 +50,7 @@
 
 - name: mount bootmnt
   ansible.posix.mount:
-    path: /srv/nfs/base/bootmnt
+    path: '{{ pxe_image_nfs_base }}/base/bootmnt'
     src: '/dev/mapper/{{ loop_device.0 }}'
     fstype: vfat
     state: mounted
@@ -58,7 +58,7 @@
 
 - name: mount rootmnt
   ansible.posix.mount:
-    path: /srv/nfs/base/rootmnt
+    path: '{{ pxe_image_nfs_base }}/base/rootmnt'
     src: '/dev/mapper/{{ loop_device.1 }}'
     fstype: ext4
     state: mounted
@@ -68,7 +68,7 @@
   ansible.builtin.lineinfile:
     path: /etc/default/tftpd-hpa
     regexp: '^TFTP_DIRECTORY='
-    line: TFTP_DIRECTORY="/srv/tftpboot"
+    line: TFTP_DIRECTORY="{{ pxe_image_tftp_base }}"
 
 - name: start service and enable it
   ansible.builtin.service:
