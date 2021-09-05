@@ -1,0 +1,106 @@
+---
+- name: create a volume directory nfs base
+  ansible.builtin.file:
+    path: '/srv/nfs/pi4-{{ item.serial }}'
+    state: directory
+    mode: '0755'
+
+- name: create a volume directory tftp base
+  ansible.builtin.file:
+    path: '/srv/tftpboot/{{ item.serial }}'
+    state: directory
+    mode: '0755'
+
+- name: get stats of a rootfs
+  ansible.builtin.stat:
+    path: '/srv/nfs/pi4-{{ item.serial }}/etc/os-release'
+  register: rootfs_st
+
+- name: get stats of a bootfs
+  ansible.builtin.stat:
+    path: '/srv/nfs/pi4-{{ item.serial }}/boot/cmdline.txt'
+  register: bootfs_st
+
+- name: rsync root fs
+  ansible.builtin.command: 'rsync -a /srv/nfs/base/rootmnt/ /srv/nfs/pi4-{{ item.serial }}'
+  when: rootfs_st.stat.exists == false
+
+- name: rsync boot fs
+  ansible.builtin.command: 'rsync -a /srv/nfs/base/bootmnt/ /srv/nfs/pi4-{{ item.serial }}/boot'
+  when: bootfs_st.stat.exists == false
+
+- name: ensure cmdline config
+  ansible.builtin.lineinfile:
+    path: '/srv/nfs/pi4-{{ item.serial }}/boot/cmdline.txt'
+    regexp: '^console='
+    line: 'console=serial0,115200 console=tty1 root=/dev/nfs nfsroot={{ pxe_nfs_server }}:/srv/nfs/pi4-{{ item.serial }},vers=4.1,proto=tcp rw ip=dhcp rootwait elevator=deadline'
+
+- name: ensure fstab of volume
+  ansible.builtin.lineinfile:
+    path: '/srv/nfs/pi4-{{ item.serial }}/etc/fstab'
+    regexp: '^PARTUUID='
+    state: absent
+
+- name: mount tftpboot bind
+  ansible.posix.mount:
+    path: '/srv/tftpboot/{{ item.serial }}'
+    src: '/srv/nfs/pi4-{{ item.serial }}/boot'
+    fstype: none
+    opts: bind
+    state: mounted
+
+- name: ensure nfs exports
+  ansible.builtin.lineinfile:
+    path: /etc/exports
+    regexp: '^/srv/nfs/pi4-{{ item.serial }}'
+    line: '/srv/nfs/pi4-{{ item.serial }} {{ pxe_nfs_server_allow }}(rw,sync,no_subtree_check,no_root_squash)'
+  notify: restart_nfs
+
+- name: get state of sshd
+  ansible.builtin.stat:
+    path: '/srv/nfs/pi4-{{ item.serial }}/etc/systemd/system/multi-user.target.wants/ssh.service'
+  register: sshd_st
+
+- name: enable sshd
+  ansible.builtin.file:
+    path: '/srv/nfs/pi4-{{ item.serial }}/boot/ssh'
+    state: touch
+  when: sshd_st.stat.exists == false
+
+- name: ensure disable swapfile
+  ansible.builtin.file:
+    path: '/srv/nfs/pi4-{{ item.serial }}/etc/systemd/system/multi-user.target.wants/dphys-swapfile.service'
+    state: absent
+
+- name: ensure hostname file
+  ansible.builtin.lineinfile:
+    path: '/srv/nfs/pi4-{{ item.serial }}/etc/hostname'
+    regexp: '^raspberry'
+    line: '{{ item.name }}'
+
+- name: ensure hostname file
+  ansible.builtin.copy:
+    dest: '/srv/nfs/pi4-{{ item.serial }}/etc/timezone'
+    content: "UTC\n"
+
+- name: ensure hostname simlink
+  ansible.builtin.file:
+    src: ../usr/share/zoneinfo/UTC
+    dest: '/srv/nfs/pi4-{{ item.serial }}/etc/localtime'
+    state: link
+
+- name: ensure gpu mem
+  ansible.builtin.lineinfile:
+    path: '/srv/nfs/pi4-{{ item.serial }}/boot/config.txt'
+    regexp: '^gpu_mem='
+    line: gpu_mem=16
+
+- name: ensure disable wifi
+  ansible.builtin.lineinfile:
+    path: '/srv/nfs/pi4-{{ item.serial }}/boot/config.txt'
+    line: dtoverlay=pi3-disable-wifi
+
+- name: ensure disable bluetooth
+  ansible.builtin.lineinfile:
+    path: '/srv/nfs/pi4-{{ item.serial }}/boot/config.txt'
+    line: dtoverlay=pi3-disable-bt

@@ -1,2 +1,84 @@
 ---
-# tasks file for pxe
+- name: install packages
+  ansible.builtin.package:
+    name:
+      - nfs-kernel-server
+      - tftp-hpa
+      - tftpd-hpa
+      - rsync
+      - unzip
+      - kpartx
+    state: present
+
+- name: create a directory if it does not exist
+  ansible.builtin.file:
+    path: '{{ item }}'
+    state: directory
+    mode: '0755'
+  loop:
+    - /srv/nfs
+    - /srv/nfs/base/bootmnt
+    - /srv/nfs/base/rootmnt
+    - /srv/tftpboot
+
+- name: download os imge
+  get_url:
+    url: '{{ pxe_image_url }}'
+    dest: '/srv/nfs/base/{{ pxe_image_version }}.zip'
+
+- name: unarchive a file that is already on the remote machine
+  ansible.builtin.unarchive:
+    src: '/srv/nfs/base/{{ pxe_image_version }}.zip'
+    dest: /srv/nfs/base
+    remote_src: true
+
+- name: get stats of a rootfs
+  ansible.builtin.stat:
+    path: '/srv/nfs/base/rootmnt/etc/os-release'
+  register: rootfs_st
+
+- name: exec kpartx
+  ansible.builtin.command: 'kpartx -av {{ pxe_image_nfs_base }}/base/{{ pxe_image_version }}.img'
+  register: kpartx_cmd
+  failed_when: kpartx_cmd.rc >= 2
+  when: rootfs_st.stat.exists == false
+
+- name: set a variable of loop device
+  ansible.builtin.set_fact:
+    loop_device: "{{ kpartx_cmd.stdout_lines | regex_findall('loop[0-9]p[0-9]', multiline=True, ignorecase=True) }}"
+  when: rootfs_st.stat.exists == false
+
+- name: mount bootmnt
+  ansible.posix.mount:
+    path: /srv/nfs/base/bootmnt
+    src: '/dev/mapper/{{ loop_device.0 }}'
+    fstype: vfat
+    state: mounted
+  when: rootfs_st.stat.exists == false
+
+- name: mount rootmnt
+  ansible.posix.mount:
+    path: /srv/nfs/base/rootmnt
+    src: '/dev/mapper/{{ loop_device.1 }}'
+    fstype: ext4
+    state: mounted
+  when: rootfs_st.stat.exists == false
+
+- name: ensuer tftp dir
+  ansible.builtin.lineinfile:
+    path: /etc/default/tftpd-hpa
+    regexp: '^TFTP_DIRECTORY='
+    line: TFTP_DIRECTORY="/srv/tftpboot"
+
+- name: start service and enable it
+  ansible.builtin.service:
+    name: '{{ item }}'
+    state: started
+    enabled: true
+  loop:
+    - tftpd-hpa
+    - rpcbind
+    - nfs-kernel-server
+
+- include_tasks: volume.yml
+  loop: '{{ pxe_pis }}'
